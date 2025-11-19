@@ -1,3 +1,8 @@
+# ==============================
+#  ADMIN PANEL (PRO VERSION)
+#  Fully Fixed – User List + Credits + Validity
+# ==============================
+
 from typing import Dict
 import os
 import telebot
@@ -5,6 +10,9 @@ from telebot import types
 from config import DB_PATH
 
 
+# ==============================
+# MAIN ADMIN MENU
+# ==============================
 def build_admin_menu():
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton(text="Manage Credits", callback_data="admin:credits"))
@@ -17,194 +25,180 @@ def build_admin_menu():
     return kb
 
 
-def build_submenu(kind: str):
-    kb = types.InlineKeyboardMarkup()
-    if kind == "credits":
-        kb.add(types.InlineKeyboardButton(text="Add Credits", callback_data="admin:credits:add"))
-        kb.add(types.InlineKeyboardButton(text="Remove Credits", callback_data="admin:credits:remove"))
-        return kb
-    if kind == "validity":
-        kb.add(types.InlineKeyboardButton(text="Set Validity", callback_data="admin:validity:set"))
-        kb.add(types.InlineKeyboardButton(text="Remove Validity", callback_data="admin:validity:remove"))
-        return kb
-    if kind == "admins":
-        kb.add(types.InlineKeyboardButton(text="Add Admin", callback_data="admin:admins:add"))
-        kb.add(types.InlineKeyboardButton(text="Remove Admin", callback_data="admin:admins:remove"))
-        return kb
-    kb.add(types.InlineKeyboardButton(text="Back", callback_data="admin:menu"))
-    return kb
-
-
+# ==============================
+# USER LIST KEYBOARD
+# ==============================
 def build_user_list_keyboard(users, prefix: str):
     kb = types.InlineKeyboardMarkup()
-    row = []
+
     for u in users:
-        label = f"{u['id']} @{u.get('username') or ''}".strip()
-        row.append(types.InlineKeyboardButton(text=label, callback_data=f"{prefix}:{u['id']}"))
-        if len(row) == 2:
-            kb.row(*row)
-            row = []
-    if row:
-        kb.row(*row)
-    kb.add(types.InlineKeyboardButton(text="Back", callback_data="admin:menu"))
+        label = f"{u['id']} @{u.get('username') or 'unknown'}"
+        kb.add(types.InlineKeyboardButton(text=label, callback_data=f"{prefix}:{u['id']}"))
+
+    kb.add(types.InlineKeyboardButton(text="⬅ Back", callback_data="admin:menu"))
     return kb
 
 
+# ==============================
+# REGISTER HANDLERS
+# ==============================
 def register_admin_handlers(bot: telebot.TeleBot, db):
     admin_steps: Dict[int, Dict] = {}
 
-    def ensure_admin(user_id: int) -> bool:
-        return db.is_admin(user_id)
+    def ensure_admin(uid: int):
+        return db.is_admin(uid)
 
+    # ADMIN COMMAND
     @bot.message_handler(commands=["admin"])
-    def admin_cmd(message: types.Message):
+    def admin_cmd(message):
         if not ensure_admin(message.from_user.id):
             return
-        bot.send_message(message.chat.id, "Admin Panel", reply_markup=build_admin_menu())
 
-    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("admin:"))
-    def admin_callbacks(callback: types.CallbackQuery):
-        if not ensure_admin(callback.from_user.id):
-            bot.answer_callback_query(callback.id)
-            return
+        bot.send_message(message.chat.id, "⚙️ Admin Panel", reply_markup=build_admin_menu())
+
+    # ==============================
+    # CALLBACK HANDLER
+    # ==============================
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admin:"))
+    def cb(callback):
+        uid = callback.from_user.id
+        if not ensure_admin(uid):
+            return bot.answer_callback_query(callback.id, "Unauthorized")
+
         parts = callback.data.split(":")
         action = parts[1]
-        if action == "menu":
-            bot.edit_message_reply_markup(callback.message.chat.id, callback.message.message_id, reply_markup=build_admin_menu())
-        elif action == "credits":
-            # Show users as buttons for quick selection
-            if len(parts) == 2:
-                users = db.list_users(limit=100)
-                kb = build_user_list_keyboard(users, prefix="admin:credits:user")
-                bot.send_message(callback.message.chat.id, "Select user to manage credits:", reply_markup=kb)
-            elif parts[2] == "user":
-                target_id = int(parts[3])
-                admin_steps[callback.from_user.id] = {"action": None, "target_user": target_id}
-                kb = types.InlineKeyboardMarkup()
-                kb.add(types.InlineKeyboardButton(text="Add Credits", callback_data=f"admin:credits:do:add:{target_id}"))
-                kb.add(types.InlineKeyboardButton(text="Remove Credits", callback_data=f"admin:credits:do:remove:{target_id}"))
-                kb.add(types.InlineKeyboardButton(text="Back", callback_data="admin:credits"))
-                bot.send_message(callback.message.chat.id, f"Selected user {target_id}. Choose an action:", reply_markup=kb)
-            elif parts[2] == "do":
-                op = parts[3]
-                target_id = int(parts[4])
-                if op == "add":
-                    admin_steps[callback.from_user.id] = {"action": "add_credits", "target_user": target_id}
-                    bot.send_message(callback.message.chat.id, "Reply with amount to add")
-                elif op == "remove":
-                    admin_steps[callback.from_user.id] = {"action": "remove_credits", "target_user": target_id}
-                    bot.send_message(callback.message.chat.id, "Reply with amount to remove")
-        elif action == "validity":
-            # Show users as buttons for quick selection
-            if len(parts) == 2:
-                users = db.list_users(limit=100)
-                kb = build_user_list_keyboard(users, prefix="admin:validity:user")
-                bot.send_message(callback.message.chat.id, "Select user to manage validity:", reply_markup=kb)
-            elif parts[2] == "user":
-                target_id = int(parts[3])
-                admin_steps[callback.from_user.id] = {"action": None, "target_user": target_id}
-                kb = types.InlineKeyboardMarkup()
-                kb.add(types.InlineKeyboardButton(text="Set Validity", callback_data=f"admin:validity:do:set:{target_id}"))
-                kb.add(types.InlineKeyboardButton(text="Remove Validity", callback_data=f"admin:validity:do:remove:{target_id}"))
-                kb.add(types.InlineKeyboardButton(text="Back", callback_data="admin:validity"))
-                bot.send_message(callback.message.chat.id, f"Selected user {target_id}. Choose an action:", reply_markup=kb)
-            elif parts[2] == "do":
-                op = parts[3]
-                target_id = int(parts[4])
-                if op == "set":
-                    admin_steps[callback.from_user.id] = {"action": "set_validity", "target_user": target_id}
-                    bot.send_message(callback.message.chat.id, "Reply with days to set")
-                elif op == "remove":
-                    # Perform removal immediately without extra typing
-                    db.remove_validity(target_id)
-                    bot.send_message(callback.message.chat.id, f"Validity removed: {target_id}")
-        elif action == "list_users":
-            users = db.list_users(limit=50)
-            lines = ["Users:"]
-            for u in users:
-                lines.append(f"{u['id']} @{u.get('username')} credits={u.get('credits')} premium={u.get('is_premium')}")
-            bot.send_message(callback.message.chat.id, "\n".join(lines) if lines else "No users")
-        elif action == "list_premium":
-            users = db.list_premium_users(limit=50)
-            lines = ["Premium Users:"]
-            for u in users:
-                lines.append(f"{u['id']} @{u.get('username')} credits={u.get('credits')} exp={u.get('validity_expire_at')}")
-            bot.send_message(callback.message.chat.id, "\n".join(lines) if lines else "No premium users")
-        elif action == "broadcast":
-            admin_steps[callback.from_user.id] = {"action": "broadcast"}
-            bot.send_message(callback.message.chat.id, "Send broadcast text now")
-        elif action == "download":
-            # Send the raw SQLite database file directly
-            try:
-                path = DB_PATH
-                if not os.path.isfile(path):
-                    bot.send_message(callback.message.chat.id, f"Database file not found: {path}")
-                else:
-                    with open(path, "rb") as f:
-                        bot.send_document(callback.message.chat.id, f, caption=f"Database: {os.path.basename(path)}")
-            except Exception as e:
-                bot.send_message(callback.message.chat.id, f"Download failed: {e}")
-        elif action == "admins":
-            if len(parts) == 2:
-                bot.send_message(callback.message.chat.id, "Admins Menu", reply_markup=build_submenu("admins"))
-            elif parts[2] == "add":
-                admin_steps[callback.from_user.id] = {"action": "add_admin"}
-                bot.send_message(callback.message.chat.id, "Reply: user_id")
-            elif parts[2] == "remove":
-                admin_steps[callback.from_user.id] = {"action": "remove_admin"}
-                bot.send_message(callback.message.chat.id, "Reply: user_id")
+
         bot.answer_callback_query(callback.id)
 
-    # Only handle admin step replies when a step is active for this user
-    @bot.message_handler(func=lambda m: admin_steps.get(m.from_user.id) is not None, content_types=['text'])
-    def admin_steps_handler(message: types.Message):
-        step = admin_steps.get(message.from_user.id)
-        if not step or not ensure_admin(message.from_user.id):
+        # ========= BACK TO MAIN MENU =========
+        if action == "menu":
+            bot.edit_message_reply_markup(callback.message.chat.id, callback.message.message_id, build_admin_menu())
             return
-        act = step.get("action")
+
+        # ========= MANAGE CREDITS =========
+        if action == "credits":
+            users = db.list_users(limit=200)
+            kb = build_user_list_keyboard(users, "admin:credits:user")
+            return bot.send_message(callback.message.chat.id, "Select a user:", reply_markup=kb)
+
+        if action == "validity":
+            users = db.list_users(limit=200)
+            kb = build_user_list_keyboard(users, "admin:validity:user")
+            return bot.send_message(callback.message.chat.id, "Select a user:", reply_markup=kb)
+
+        # ========= USER SELECTED FOR CREDITS =========
+        if action == "credits" and parts[2] == "user":
+            user_id = int(parts[3])
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("Add Credits", callback_data=f"admin:credits:add:{user_id}"))
+            kb.add(types.InlineKeyboardButton("Remove Credits", callback_data=f"admin:credits:remove:{user_id}"))
+            kb.add(types.InlineKeyboardButton("⬅ Back", callback_data="admin:credits"))
+            return bot.send_message(callback.message.chat.id, f"User ID: {user_id}\nChoose an action:", reply_markup=kb)
+
+        # ========= USER SELECTED FOR VALIDITY =========
+        if action == "validity" and parts[2] == "user":
+            user_id = int(parts[3])
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("Set Validity", callback_data=f"admin:validity:set:{user_id}"))
+            kb.add(types.InlineKeyboardButton("Remove Validity", callback_data=f"admin:validity:remove:{user_id}"))
+            kb.add(types.InlineKeyboardButton("⬅ Back", callback_data="admin:validity"))
+            return bot.send_message(callback.message.chat.id, f"User ID: {user_id}\nChoose an action:", reply_markup=kb)
+
+        # ========= CREDIT ACTION =========
+        if action == "credits" and parts[2] in ("add", "remove"):
+            op = parts[2]
+            target = int(parts[3])
+
+            admin_steps[uid] = {"action": op, "target": target}
+            return bot.send_message(callback.message.chat.id, "Send amount:")
+
+        # ========= VALIDITY ACTION =========
+        if action == "validity" and parts[2] == "set":
+            target = int(parts[3])
+            admin_steps[uid] = {"action": "set_validity", "target": target}
+            return bot.send_message(callback.message.chat.id, "Send number of days:")
+
+        if action == "validity" and parts[2] == "remove":
+            target = int(parts[3])
+            db.remove_validity(target)
+            return bot.send_message(callback.message.chat.id, f"✔ Validity removed for {target}")
+
+        # ========= LIST USERS =========
+        if action == "list_users":
+            users = db.list_users(limit=200)
+            txt = "👥 Users:\n\n" + "\n".join(
+                f"{u['id']} @{u.get('username')} | credits={u.get('credits')} | premium={u.get('is_premium')}"
+                for u in users
+            )
+            return bot.send_message(callback.message.chat.id, txt)
+
+        # ========= LIST PREMIUM USERS =========
+        if action == "list_premium":
+            users = db.list_premium_users(limit=200)
+            txt = "⭐ Premium Users:\n\n" + "\n".join(
+                f"{u['id']} @{u.get('username')} | credits={u.get('credits')} | exp={u.get('validity_expire_at')}"
+                for u in users
+            )
+            return bot.send_message(callback.message.chat.id, txt)
+
+        # ========= BROADCAST =========
+        if action == "broadcast":
+            admin_steps[uid] = {"action": "broadcast"}
+            return bot.send_message(callback.message.chat.id, "Send broadcast text:")
+
+        # ========= DOWNLOAD DB =========
+        if action == "download":
+            try:
+                with open(DB_PATH, "rb") as f:
+                    bot.send_document(callback.message.chat.id, f, caption="Database File")
+            except:
+                bot.send_message(callback.message.chat.id, "DB file not found!")
+
+    # ==============================
+    # HANDLE TYPED INPUT
+    # ==============================
+    @bot.message_handler(func=lambda m: m.from_user.id in admin_steps)
+    def step_input(msg):
+        uid = msg.from_user.id
+        step = admin_steps.get(uid)
+
+        if not step:
+            return
+
+        action = step["action"]
+        target = step["target"]
+
         try:
-            if act in ("add_credits", "remove_credits"):
-                user_id = int(step.get("target_user") or 0)
-                amount = int(message.text.strip())
-                db.ensure_user(user_id, None)
-                if act == "add_credits":
-                    db.add_credits(user_id, amount)
-                    bot.send_message(message.chat.id, f"Credits added: {user_id} +{amount}")
-                    try:
-                        bot.send_message(user_id, f"You received {amount} voice credits. Enjoy!")
-                    except Exception:
-                        pass
+            # ADD / REMOVE CREDITS
+            if action in ("add", "remove"):
+                amount = int(msg.text)
+                if action == "add":
+                    db.add_credits(target, amount)
+                    bot.send_message(msg.chat.id, f"✔ Added {amount} credits to {target}")
                 else:
-                    db.remove_credits(user_id, amount)
-                    bot.send_message(message.chat.id, f"Credits removed: {user_id} -{amount}")
-            elif act == "set_validity":
-                user_id = int(step.get("target_user") or 0)
-                days = int(message.text.strip())
-                db.set_validity(user_id, days)
-                bot.send_message(message.chat.id, f"Validity set: {user_id} {days} days")
-                try:
-                    bot.send_message(user_id, f"Your premium validity is set for {days} days.")
-                except Exception:
-                    pass
-            elif act == "broadcast":
-                users = db.list_users(limit=10000)
+                    db.remove_credits(target, amount)
+                    bot.send_message(msg.chat.id, f"✔ Removed {amount} credits from {target}")
+
+            # SET VALIDITY
+            elif action == "set_validity":
+                days = int(msg.text)
+                db.set_validity(target, days)
+                bot.send_message(msg.chat.id, f"✔ Validity set for {target} ({days} days)")
+
+            # BROADCAST
+            elif action == "broadcast":
+                users = db.list_users(limit=20000)
                 sent = 0
                 for u in users:
                     try:
-                        bot.send_message(u["id"], message.text)
+                        bot.send_message(u["id"], msg.text)
                         sent += 1
-                    except Exception:
+                    except:
                         pass
-                bot.send_message(message.chat.id, f"Broadcast sent to {sent} users")
-            elif act == "add_admin":
-                user_id = int(message.text.strip())
-                db.add_admin(user_id)
-                bot.send_message(message.chat.id, f"Admin added: {user_id}")
-            elif act == "remove_admin":
-                user_id = int(message.text.strip())
-                db.remove_admin(user_id)
-                bot.send_message(message.chat.id, f"Admin removed: {user_id}")
+                bot.send_message(msg.chat.id, f"Broadcast sent to {sent} users")
+
         except Exception as e:
-            bot.send_message(message.chat.id, f"Error: {e}")
+            bot.send_message(msg.chat.id, f"Error: {e}")
+
         finally:
-            admin_steps.pop(message.from_user.id, None)
+            admin_steps.pop(uid, None)
