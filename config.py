@@ -6,7 +6,7 @@ load_dotenv()
 # -------------------------
 # FIXED ADMIN IDS (Do not overwrite)
 # -------------------------
-ADMIN_IDS = [6607756715]   # <-- আপনার Telegram numeric ID
+ADMIN_IDS = [5549957196]   # <-- আপনার Telegram numeric ID
 
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 FISH_AUDIO_API_KEY = os.getenv("VOICE_API_KEY", "")
