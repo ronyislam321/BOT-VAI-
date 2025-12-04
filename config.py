@@ -28,12 +28,14 @@ REQUIRE_VALIDITY_FOR_TTS = False
 MAX_TTS_CHARS = int(os.getenv("MAX_TTS_CHARS", "200"))
 
 DEFAULT_MODELS = [
-    {"id": "20242ec654ed4e219b022620ad2cc110", "name": "Ruby"},
-    {"id": "bc9d5abe2272408e8274b8b8710c2776", "name": "Daisy"},
-    {"id": "08c71a54c93e4de2a482470607cae405", "name": "Anna"},
-    {"id": "cfc1a79550df4970bcae26f11d7ddf28", "name": "Even"},
+    {"id": "a5e5bbe15fb6465fb113c1bab4de8b2e", "name": "Marie"},
+    {"id": "89caeb03934840e791f7d13e9c03b6ef", "name": "Daisy"},
+    {"id": "e3fbe8fdb0ea40d8a15d527ab854b8af", "name": "Ayesha"},
+    {"id": "b8daf8f8981a484abb8cc9520641b5dc", "name": "Anna"},
+    {"id": "29913697e157485c941c737314c27819", "name": "Ruby"},
     {"id": "d75c78da679a4d8480e4bcfb6c60bdc6", "name": "Nora"},
-    {"id": "9f20d4638c2846968e51c794faaf26a5", "name": "Sara"},
+    {"id": "d39b35734b49454784d2dbcc17cd45b9", "name": "Denica"},
+    {"id": "c5e4c4c57a084a0f9b5b277d36546ef0", "name": "Even"},
 ]
 
 USE_CONFIG_MODELS_ONLY = True
