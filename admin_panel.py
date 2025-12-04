@@ -1,80 +1,185 @@
+from typing import Dict
+import os
 import telebot
 from telebot import types
-from config import ADMIN_IDS
-import time
+from config import DB_PATH
 
 
-def register_admin_handlers(bot, db):
+def build_admin_menu():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("Manage Credits", callback_data="admin:credits"))
+    kb.add(types.InlineKeyboardButton("Manage Validity", callback_data="admin:validity"))
+    kb.add(types.InlineKeyboardButton("List Users", callback_data="admin:list_users"))
+    kb.add(types.InlineKeyboardButton("List Premium Users", callback_data="admin:list_premium"))
+    kb.add(types.InlineKeyboardButton("Broadcast", callback_data="admin:broadcast"))
+    kb.add(types.InlineKeyboardButton("Download Data", callback_data="admin:download"))
+    kb.add(types.InlineKeyboardButton("Manage Admins", callback_data="admin:admins"))
+    return kb
 
-    # ---------------- ADMIN PANEL BUTTON ----------------
+
+def build_user_list_keyboard(users, prefix: str):
+    kb = types.InlineKeyboardMarkup()
+    for u in users:
+        label = f"{u['id']} @{u.get('username') or 'unknown'}"
+        kb.add(types.InlineKeyboardButton(label, callback_data=f"{prefix}:{u['id']}"))
+    kb.add(types.InlineKeyboardButton("⬅ Back", callback_data="admin:menu"))
+    return kb
+
+
+def register_admin_handlers(bot: telebot.TeleBot, db):
+    admin_steps: Dict[int, Dict] = {}
+
+    def ensure_admin(uid: int):
+        return db.is_admin(uid)
+
     @bot.message_handler(commands=["admin"])
-    def admin_panel(message):
-        if message.from_user.id not in ADMIN_IDS:
-            return bot.send_message(message.chat.id, "❌ You are not an admin.")
-
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.row("📊 User List")
-        kb.row("📢 Broadcast")
-        kb.row("⬅ Back")
-
-        bot.send_message(
-            message.chat.id,
-            "<b>🔐 Admin Panel</b>\nChoose an option:",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-
-    # ---------------- USER LIST ----------------
-    @bot.message_handler(func=lambda m: m.text == "📊 User List")
-    def show_users(message):
-        if message.from_user.id not in ADMIN_IDS:
+    def admin_cmd(message):
+        if not ensure_admin(message.from_user.id):
             return
+        bot.send_message(message.chat.id, "⚙️ Admin Panel", reply_markup=build_admin_menu())
 
-        users = db.list_all_users()
-        text = f"👥 <b>Total Users:</b> {len(users)}\n\n"
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admin:"))
+    def cb(callback):
+        uid = callback.from_user.id
+        if not ensure_admin(uid):
+            return bot.answer_callback_query(callback.id)
 
-        for u in users[:50]:   # first 50 only
-            username = u["username"] or "No username"
-            text += f"🆔 {u['id']} — @{username}\n"
+        bot.answer_callback_query(callback.id)
+        parts = callback.data.split(":")
 
-        bot.send_message(message.chat.id, text, parse_mode="HTML")
+        section = parts[1]
 
-    # ---------------- ASK BROADCAST ----------------
-    @bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
-    def ask_broadcast(message):
-        if message.from_user.id not in ADMIN_IDS:
-            return
+        # -----------------------
+        # MAIN MENU
+        # -----------------------
+        if section == "menu":
+            return bot.edit_message_reply_markup(callback.message.chat.id, callback.message.message_id, build_admin_menu())
 
-        msg = bot.send_message(message.chat.id, "📝 Send the message to broadcast:")
-        bot.register_next_step_handler(msg, do_broadcast, db)
+        # -----------------------
+        # CREDITS → SHOW USERS
+        # -----------------------
+        if section == "credits" and len(parts) == 2:
+            users = db.list_users(limit=200)
+            kb = build_user_list_keyboard(users, "admin:credits:user")
+            return bot.send_message(callback.message.chat.id, "Select a user:", reply_markup=kb)
 
-    def do_broadcast(message, db):
-        if message.from_user.id not in ADMIN_IDS:
-            return
+        # -----------------------
+        # VALIDITY → SHOW USERS
+        # -----------------------
+        if section == "validity" and len(parts) == 2:
+            users = db.list_users(limit=200)
+            kb = build_user_list_keyboard(users, "admin:validity:user")
+            return bot.send_message(callback.message.chat.id, "Select a user:", reply_markup=kb)
 
-        text = message.text.strip()
-        users = db.list_all_users()
+        # -----------------------
+        # SELECTED USER FOR CREDITS
+        # -----------------------
+        if section == "credits" and parts[2] == "user":
+            user_id = int(parts[3])
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("Add Credits", callback_data=f"admin:credits:add:{user_id}"))
+            kb.add(types.InlineKeyboardButton("Remove Credits", callback_data=f"admin:credits:remove:{user_id}"))
+            kb.add(types.InlineKeyboardButton("⬅ Back", callback_data="admin:credits"))
+            return bot.send_message(callback.message.chat.id, f"User {user_id}\nChoose action:", reply_markup=kb)
 
-        bot.send_message(message.chat.id, f"⏳ Sending to {len(users)} users...")
+        # -----------------------
+        # SELECTED USER FOR VALIDITY
+        # -----------------------
+        if section == "validity" and parts[2] == "user":
+            user_id = int(parts[3])
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("Set Validity", callback_data=f"admin:validity:set:{user_id}"))
+            kb.add(types.InlineKeyboardButton("Remove Validity", callback_data=f"admin:validity:remove:{user_id}"))
+            kb.add(types.InlineKeyboardButton("⬅ Back", callback_data="admin:validity"))
+            return bot.send_message(callback.message.chat.id, f"User {user_id}\nChoose action:", reply_markup=kb)
 
-        sent = 0
-        failed = 0
+        # -----------------------
+        # CREDIT AMOUNT INPUT
+        # -----------------------
+        if section == "credits" and parts[2] in ("add", "remove"):
+            admin_steps[uid] = {"action": parts[2], "target": int(parts[3])}
+            return bot.send_message(callback.message.chat.id, "Send credit amount:")
 
-        for u in users:
+        # -----------------------
+        # VALIDITY INPUT
+        # -----------------------
+        if section == "validity" and parts[2] == "set":
+            admin_steps[uid] = {"action": "set_validity", "target": int(parts[3])}
+            return bot.send_message(callback.message.chat.id, "Send number of days:")
+
+        if section == "validity" and parts[2] == "remove":
+            target = int(parts[3])
+            db.remove_validity(target)
+            return bot.send_message(callback.message.chat.id, f"✔ Removed validity for {target}")
+
+        # -----------------------
+        # LIST USERS
+        # -----------------------
+        if section == "list_users":
+            users = db.list_users()
+            text = "\n".join([f"{u['id']} @{u.get('username')} | credits={u.get('credits')}" for u in users])
+            return bot.send_message(callback.message.chat.id, text or "No users")
+
+        # -----------------------
+        # LIST PREMIUM
+        # -----------------------
+        if section == "list_premium":
+            users = db.list_premium_users()
+            text = "\n".join([f"{u['id']} credits={u.get('credits')} exp={u.get('validity_expire_at')}" for u in users])
+            return bot.send_message(callback.message.chat.id, text or "No premium users")
+
+        # -----------------------
+        # BROADCAST
+        # -----------------------
+        if section == "broadcast":
+            admin_steps[uid] = {"action": "broadcast"}
+            return bot.send_message(callback.message.chat.id, "Send broadcast message:")
+
+        if section == "download":
             try:
-                bot.send_message(u["id"], f"📢 <b>Broadcast</b>:\n{text}", parse_mode="HTML")
-                sent += 1
-                time.sleep(0.05)
+                with open(DB_PATH, "rb") as f:
+                    return bot.send_document(callback.message.chat.id, f)
             except:
-                failed += 1
+                return bot.send_message(callback.message.chat.id, "DB not found!")
 
-        bot.send_message(
-            message.chat.id,
-            f"✅ <b>Done!</b>\n📨 Sent: {sent}\n❌ Failed: {failed}",
-            parse_mode="HTML"
-        )
+    # -----------------------
+    # STEP HANDLER
+    # -----------------------
+    @bot.message_handler(func=lambda m: m.from_user.id in admin_steps)
+    def step_handler(msg):
+        uid = msg.from_user.id
+        step = admin_steps.pop(uid, None)
+        if not step:
+            return
 
-    # ---------------- BACK BUTTON ----------------
-    @bot.message_handler(func=lambda m: m.text == "⬅ Back")
-    def back_btn(message):
-        bot.send_message(message.chat.id, "Back to user panel.", reply_markup=types.ReplyKeyboardRemove())
+        action = step["action"]
+        target = step["target"]
+
+        try:
+            if action == "add":
+                amount = int(msg.text)
+                db.add_credits(target, amount)
+                return bot.send_message(msg.chat.id, f"✔ Added {amount} credits to {target}")
+
+            if action == "remove":
+                amount = int(msg.text)
+                db.remove_credits(target, amount)
+                return bot.send_message(msg.chat.id, f"✔ Removed {amount} credits from {target}")
+
+            if action == "set_validity":
+                days = int(msg.text)
+                db.set_validity(target, days)
+                return bot.send_message(msg.chat.id, f"✔ Validity set for {target}")
+
+            if action == "broadcast":
+                count = 0
+                for u in db.list_users(limit=999999):
+                    try:
+                        bot.send_message(u["id"], msg.text)
+                        count += 1
+                    except:
+                        pass
+                return bot.send_message(msg.chat.id, f"✔ Broadcast sent to {count} users")
+
+        except Exception as e:
+            bot.send_message(msg.chat.id, f"❌ Error: {e}")
