@@ -20,6 +20,7 @@ class Database:
                 credits INTEGER DEFAULT 0,
                 validity_expire_at TEXT,
                 selected_model TEXT,
+                tts_speed TEXT,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -42,6 +43,13 @@ class Database:
             )
             """
         )
+
+        # Migration safety: if old DB exists without tts_speed, add it.
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN tts_speed TEXT")
+        except Exception:
+            pass
+
         self.conn.commit()
 
     def ensure_user(self, user_id: int, username: Optional[str]):
@@ -51,8 +59,8 @@ class Database:
         now = datetime.utcnow().isoformat()
         if not row:
             cur.execute(
-                "INSERT INTO users (id, username, is_premium, credits, created_at, updated_at) VALUES (?, ?, 0, 0, ?, ?)",
-                (user_id, username, now, now),
+                "INSERT INTO users (id, username, is_premium, credits, tts_speed, created_at, updated_at) VALUES (?, ?, 0, 0, ?, ?, ?)",
+                (user_id, username, "natural", now, now),
             )
             self.conn.commit()
 
@@ -75,8 +83,10 @@ class Database:
 
     def add_credits(self, user_id: int, amount: int):
         cur = self.conn.cursor()
-        cur.execute("UPDATE users SET credits = COALESCE(credits,0) + ?, is_premium = 1, updated_at = ? WHERE id = ?",
-                    (amount, datetime.utcnow().isoformat(), user_id))
+        cur.execute(
+            "UPDATE users SET credits = COALESCE(credits,0) + ?, is_premium = 1, updated_at = ? WHERE id = ?",
+            (amount, datetime.utcnow().isoformat(), user_id),
+        )
         self.conn.commit()
 
     def remove_credits(self, user_id: int, amount: int):
@@ -137,12 +147,6 @@ class Database:
     def list_user_voices(self, user_id: int) -> List[Dict[str, Any]]:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM voices WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-        rows = cur.fetchall()
-        return [dict(r) for r in rows]
-
-    def list_all_voices(self) -> List[Dict[str, Any]]:
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM voices ORDER BY created_at DESC")
         rows = cur.fetchall()
         return [dict(r) for r in rows]
 
