@@ -1,5 +1,4 @@
 from typing import Dict
-import os
 import telebot
 from telebot import types
 from config import DB_PATH
@@ -46,14 +45,17 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
 
         bot.answer_callback_query(callback.id)
         parts = callback.data.split(":")
-
         section = parts[1]
 
         # -----------------------
         # MAIN MENU
         # -----------------------
         if section == "menu":
-            return bot.edit_message_reply_markup(callback.message.chat.id, callback.message.message_id, build_admin_menu())
+            return bot.edit_message_reply_markup(
+                callback.message.chat.id,
+                callback.message.message_id,
+                build_admin_menu()
+            )
 
         # -----------------------
         # CREDITS → SHOW USERS
@@ -132,14 +134,17 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         # BROADCAST
         # -----------------------
         if section == "broadcast":
-            admin_steps[uid] = {"action": "broadcast"}
+            admin_steps[uid] = {"action": "broadcast", "target": 0}
             return bot.send_message(callback.message.chat.id, "Send broadcast message:")
 
+        # -----------------------
+        # DOWNLOAD DB
+        # -----------------------
         if section == "download":
             try:
                 with open(DB_PATH, "rb") as f:
                     return bot.send_document(callback.message.chat.id, f)
-            except:
+            except Exception:
                 return bot.send_message(callback.message.chat.id, "DB not found!")
 
     # -----------------------
@@ -152,8 +157,8 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         if not step:
             return
 
-        action = step["action"]
-        target = step["target"]
+        action = step.get("action")
+        target = step.get("target", 0)
 
         try:
             if action == "add":
@@ -171,15 +176,30 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
                 db.set_validity(target, days)
                 return bot.send_message(msg.chat.id, f"✔ Validity set for {target}")
 
+            # ✅ FIXED BROADCAST (rate limit + report)
             if action == "broadcast":
-                count = 0
-                for u in db.list_users(limit=999999):
+                import time
+
+                users = db.list_users(limit=100000)
+                sent = 0
+                failed = 0
+
+                for u in users:
+                    uid2 = u.get("id")
+                    if not uid2:
+                        continue
                     try:
-                        bot.send_message(u["id"], msg.text)
-                        count += 1
-                    except:
-                        pass
-                return bot.send_message(msg.chat.id, f"✔ Broadcast sent to {count} users")
+                        bot.send_message(uid2, msg.text)
+                        sent += 1
+                        time.sleep(0.05)  # ~20 msg/sec safe
+                    except Exception:
+                        failed += 1
+                        time.sleep(0.2)   # small backoff
+
+                return bot.send_message(
+                    msg.chat.id,
+                    f"📣 Broadcast finished.\n✅ Sent: {sent}\n❌ Failed: {failed}"
+                )
 
         except Exception as e:
             bot.send_message(msg.chat.id, f"❌ Error: {e}")
