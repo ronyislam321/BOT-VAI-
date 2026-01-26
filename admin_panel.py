@@ -1,7 +1,7 @@
 from typing import Dict
 import telebot
 from telebot import types
-from config import DB_PATH
+from config import DB_PATH, DEFAULT_MODELS
 
 
 def build_admin_menu():
@@ -9,9 +9,12 @@ def build_admin_menu():
     kb.add(types.InlineKeyboardButton("Manage Credits", callback_data="admin:credits"))
     kb.add(types.InlineKeyboardButton("Manage Validity", callback_data="admin:validity"))
 
-    # ✅ NEW: direct by user id
+    # ✅ Direct by user id
     kb.add(types.InlineKeyboardButton("Credit by User ID", callback_data="admin:credit_by_id"))
     kb.add(types.InlineKeyboardButton("Validity by User ID", callback_data="admin:validity_by_id"))
+
+    # ✅ NEW: Change default voice
+    kb.add(types.InlineKeyboardButton("Change Default Voice", callback_data="admin:voice"))
 
     kb.add(types.InlineKeyboardButton("List Users", callback_data="admin:list_users"))
     kb.add(types.InlineKeyboardButton("List Premium Users", callback_data="admin:list_premium"))
@@ -30,11 +33,40 @@ def build_user_list_keyboard(users, prefix: str):
     return kb
 
 
+def build_voice_keyboard(models):
+    kb = types.InlineKeyboardMarkup()
+    for m in (models or [])[:10]:
+        kb.add(types.InlineKeyboardButton(f"🎙 {m.get('name','Voice')}", callback_data=f"admin:voice:set:{m.get('id','')}"))
+    kb.add(types.InlineKeyboardButton("✍ Set by ID (custom)", callback_data="admin:voice:custom"))
+    kb.add(types.InlineKeyboardButton("⬅ Back", callback_data="admin:menu"))
+    return kb
+
+
 def register_admin_handlers(bot: telebot.TeleBot, db):
     admin_steps: Dict[int, Dict] = {}
 
     def ensure_admin(uid: int):
         return db.is_admin(uid)
+
+    # Safe DB settings helpers (prevents crash if db.py doesn't have these methods yet)
+    def db_get_setting(key: str, default: str = "") -> str:
+        try:
+            return db.get_setting(key, default)
+        except Exception:
+            return default
+
+    def db_set_setting(key: str, value: str) -> bool:
+        try:
+            db.set_setting(key, value)
+            return True
+        except Exception:
+            return False
+
+    def default_voice_fallback() -> str:
+        try:
+            return (DEFAULT_MODELS[0]["id"] if DEFAULT_MODELS else "")
+        except Exception:
+            return ""
 
     @bot.message_handler(commands=["admin"])
     def admin_cmd(message):
@@ -42,14 +74,17 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
             return
         bot.send_message(message.chat.id, "⚙️ Admin Panel", reply_markup=build_admin_menu())
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("admin:"))
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("admin:"))
     def cb(callback):
         uid = callback.from_user.id
         if not ensure_admin(uid):
             return bot.answer_callback_query(callback.id)
 
         bot.answer_callback_query(callback.id)
-        parts = callback.data.split(":")
+        parts = (callback.data or "").split(":")
+        if len(parts) < 2:
+            return
+
         section = parts[1]
 
         # -----------------------
@@ -63,7 +98,51 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
             )
 
         # -----------------------
-        # ✅ NEW: CREDIT BY USER ID
+        # ✅ NEW: VOICE MENU
+        # -----------------------
+        if section == "voice" and len(parts) == 2:
+            current = db_get_setting("DEFAULT_VOICE_ID", default_voice_fallback())
+            text = "🎛 Default Voice Settings\n\n" \
+                   f"Current voice id:\n<code>{current}</code>\n\n" \
+                   "Select a voice:"
+            return bot.send_message(
+                callback.message.chat.id,
+                text,
+                reply_markup=build_voice_keyboard(DEFAULT_MODELS)
+            )
+
+        # -----------------------
+        # ✅ NEW: SET VOICE BY BUTTON
+        # admin:voice:set:<voice_id>
+        # -----------------------
+        if section == "voice" and len(parts) >= 4 and parts[2] == "set":
+            voice_id = parts[3].strip()
+            if not voice_id:
+                return bot.send_message(callback.message.chat.id, "❌ Invalid Voice ID")
+
+            ok = db_set_setting("DEFAULT_VOICE_ID", voice_id)
+            if not ok:
+                return bot.send_message(
+                    callback.message.chat.id,
+                    "❌ DB settings missing.\n"
+                    "db.py তে get_setting/set_setting যোগ করতে হবে।"
+                )
+
+            return bot.send_message(
+                callback.message.chat.id,
+                f"✅ Default voice updated:\n<code>{voice_id}</code>"
+            )
+
+        # -----------------------
+        # ✅ NEW: SET VOICE BY CUSTOM ID
+        # admin:voice:custom
+        # -----------------------
+        if section == "voice" and len(parts) >= 3 and parts[2] == "custom":
+            admin_steps[uid] = {"action": "set_voice_custom", "target": 0}
+            return bot.send_message(callback.message.chat.id, "Send new Voice ID:")
+
+        # -----------------------
+        # ✅ Direct: CREDIT BY USER ID
         # -----------------------
         if section == "credit_by_id":
             admin_steps[uid] = {"action": "credit_by_id", "target": 0}
@@ -73,7 +152,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
             )
 
         # -----------------------
-        # ✅ NEW: VALIDITY BY USER ID
+        # ✅ Direct: VALIDITY BY USER ID
         # -----------------------
         if section == "validity_by_id":
             admin_steps[uid] = {"action": "validity_by_id", "target": 0}
@@ -100,6 +179,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
 
         # -----------------------
         # SELECTED USER FOR CREDITS
+        # admin:credits:user:<id>
         # -----------------------
         if section == "credits" and len(parts) > 3 and parts[2] == "user":
             user_id = int(parts[3])
@@ -111,6 +191,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
 
         # -----------------------
         # SELECTED USER FOR VALIDITY
+        # admin:validity:user:<id>
         # -----------------------
         if section == "validity" and len(parts) > 3 and parts[2] == "user":
             user_id = int(parts[3])
@@ -122,6 +203,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
 
         # -----------------------
         # CREDIT AMOUNT INPUT
+        # admin:credits:add:<id> / admin:credits:remove:<id>
         # -----------------------
         if section == "credits" and len(parts) > 3 and parts[2] in ("add", "remove"):
             admin_steps[uid] = {"action": parts[2], "target": int(parts[3])}
@@ -129,6 +211,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
 
         # -----------------------
         # VALIDITY INPUT
+        # admin:validity:set:<id>
         # -----------------------
         if section == "validity" and len(parts) > 3 and parts[2] == "set":
             admin_steps[uid] = {"action": "set_validity", "target": int(parts[3])}
@@ -186,7 +269,22 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         target = step.get("target", 0)
 
         try:
-            # ✅ NEW: direct credit by user id (format: "user_id credits")
+            # ✅ NEW: custom voice id input
+            if action == "set_voice_custom":
+                voice_id = msg.text.strip()
+                if len(voice_id) < 10:
+                    return bot.send_message(msg.chat.id, "❌ Invalid Voice ID")
+
+                ok = db_set_setting("DEFAULT_VOICE_ID", voice_id)
+                if not ok:
+                    return bot.send_message(
+                        msg.chat.id,
+                        "❌ DB settings missing.\n"
+                        "db.py তে get_setting/set_setting যোগ করতে হবে।"
+                    )
+                return bot.send_message(msg.chat.id, f"✅ Default voice updated:\n<code>{voice_id}</code>")
+
+            # ✅ Direct credit by user id (format: "user_id credits")
             if action == "credit_by_id":
                 parts = msg.text.strip().split()
                 if len(parts) != 2:
@@ -196,7 +294,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
                 db.add_credits(user_id, amount)
                 return bot.send_message(msg.chat.id, f"✔ Added {amount} credits to {user_id}")
 
-            # ✅ NEW: direct validity by user id (format: "user_id days")
+            # ✅ Direct validity by user id (format: "user_id days")
             if action == "validity_by_id":
                 parts = msg.text.strip().split()
                 if len(parts) != 2:
