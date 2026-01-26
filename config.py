@@ -36,6 +36,8 @@ DEFAULT_MODELS = [
     {"id": "d75c78da679a4d8480e4bcfb6c60bdc6", "name": "Nora"},
     {"id": "d39b35734b49454784d2dbcc17cd45b9", "name": "Denica"},
     {"id": "c5e4c4c57a084a0f9b5b277d36546ef0", "name": "Even"},
+    {"id": "2fe69a0850b54119ad97af8246e2f6a0", "name": "Freya"},
+    {"id": "60de84651feb4ac7a0bbc23c45c089e1", "name": "Gia"},
 ]
 
 USE_CONFIG_MODELS_ONLY = True
