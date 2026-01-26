@@ -8,6 +8,11 @@ def build_admin_menu():
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("Manage Credits", callback_data="admin:credits"))
     kb.add(types.InlineKeyboardButton("Manage Validity", callback_data="admin:validity"))
+
+    # ✅ NEW: direct by user id
+    kb.add(types.InlineKeyboardButton("Credit by User ID", callback_data="admin:credit_by_id"))
+    kb.add(types.InlineKeyboardButton("Validity by User ID", callback_data="admin:validity_by_id"))
+
     kb.add(types.InlineKeyboardButton("List Users", callback_data="admin:list_users"))
     kb.add(types.InlineKeyboardButton("List Premium Users", callback_data="admin:list_premium"))
     kb.add(types.InlineKeyboardButton("Broadcast", callback_data="admin:broadcast"))
@@ -58,6 +63,26 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
             )
 
         # -----------------------
+        # ✅ NEW: CREDIT BY USER ID
+        # -----------------------
+        if section == "credit_by_id":
+            admin_steps[uid] = {"action": "credit_by_id", "target": 0}
+            return bot.send_message(
+                callback.message.chat.id,
+                "Send: user_id credits\nExample: 123456 50"
+            )
+
+        # -----------------------
+        # ✅ NEW: VALIDITY BY USER ID
+        # -----------------------
+        if section == "validity_by_id":
+            admin_steps[uid] = {"action": "validity_by_id", "target": 0}
+            return bot.send_message(
+                callback.message.chat.id,
+                "Send: user_id days\nExample: 123456 30"
+            )
+
+        # -----------------------
         # CREDITS → SHOW USERS
         # -----------------------
         if section == "credits" and len(parts) == 2:
@@ -76,7 +101,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         # -----------------------
         # SELECTED USER FOR CREDITS
         # -----------------------
-        if section == "credits" and parts[2] == "user":
+        if section == "credits" and len(parts) > 3 and parts[2] == "user":
             user_id = int(parts[3])
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("Add Credits", callback_data=f"admin:credits:add:{user_id}"))
@@ -87,7 +112,7 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         # -----------------------
         # SELECTED USER FOR VALIDITY
         # -----------------------
-        if section == "validity" and parts[2] == "user":
+        if section == "validity" and len(parts) > 3 and parts[2] == "user":
             user_id = int(parts[3])
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("Set Validity", callback_data=f"admin:validity:set:{user_id}"))
@@ -98,18 +123,18 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         # -----------------------
         # CREDIT AMOUNT INPUT
         # -----------------------
-        if section == "credits" and parts[2] in ("add", "remove"):
+        if section == "credits" and len(parts) > 3 and parts[2] in ("add", "remove"):
             admin_steps[uid] = {"action": parts[2], "target": int(parts[3])}
             return bot.send_message(callback.message.chat.id, "Send credit amount:")
 
         # -----------------------
         # VALIDITY INPUT
         # -----------------------
-        if section == "validity" and parts[2] == "set":
+        if section == "validity" and len(parts) > 3 and parts[2] == "set":
             admin_steps[uid] = {"action": "set_validity", "target": int(parts[3])}
             return bot.send_message(callback.message.chat.id, "Send number of days:")
 
-        if section == "validity" and parts[2] == "remove":
+        if section == "validity" and len(parts) > 3 and parts[2] == "remove":
             target = int(parts[3])
             db.remove_validity(target)
             return bot.send_message(callback.message.chat.id, f"✔ Removed validity for {target}")
@@ -161,6 +186,26 @@ def register_admin_handlers(bot: telebot.TeleBot, db):
         target = step.get("target", 0)
 
         try:
+            # ✅ NEW: direct credit by user id (format: "user_id credits")
+            if action == "credit_by_id":
+                parts = msg.text.strip().split()
+                if len(parts) != 2:
+                    return bot.send_message(msg.chat.id, "❌ Format: user_id credits\nExample: 123456 50")
+                user_id = int(parts[0])
+                amount = int(parts[1])
+                db.add_credits(user_id, amount)
+                return bot.send_message(msg.chat.id, f"✔ Added {amount} credits to {user_id}")
+
+            # ✅ NEW: direct validity by user id (format: "user_id days")
+            if action == "validity_by_id":
+                parts = msg.text.strip().split()
+                if len(parts) != 2:
+                    return bot.send_message(msg.chat.id, "❌ Format: user_id days\nExample: 123456 30")
+                user_id = int(parts[0])
+                days = int(parts[1])
+                db.set_validity(user_id, days)
+                return bot.send_message(msg.chat.id, f"✔ Validity set: {days} days for {user_id}")
+
             if action == "add":
                 amount = int(msg.text)
                 db.add_credits(target, amount)
